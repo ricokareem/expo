@@ -113,6 +113,36 @@ typedef NS_ENUM(NSInteger, EXUpdatesDevLauncherErrorCode) {
   }];
 }
 
+- (nonnull NSArray<NSUUID *> *)storedUpdateIdsWithConfiguration:(nonnull NSDictionary *)configuration error:(EXUpdatesErrorBlock)errorBlock {
+  EXUpdatesAppController *controller = EXUpdatesAppController.sharedInstance;
+  EXUpdatesConfig *updatesConfiguration = [EXUpdatesConfig configWithExpoPlist];
+  [updatesConfiguration loadConfigFromDictionary:configuration];
+  if (!updatesConfiguration.updateUrl || !updatesConfiguration.scopeKey) {
+    errorBlock([NSError errorWithDomain:EXUpdatesDevLauncherControllerErrorDomain code:EXUpdatesDevLauncherErrorCodeInvalidUpdateURL userInfo:@{NSLocalizedDescriptionKey: @"Failed to read stored updates: configuration object must include a valid update URL"}]);
+    return @[];
+  }
+  NSError *fsError;
+  if (![controller initializeUpdatesDirectoryWithError:&fsError]) {
+    errorBlock(fsError ?: [NSError errorWithDomain:EXUpdatesDevLauncherControllerErrorDomain code:EXUpdatesDevLauncherErrorCodeDirectoryInitializationFailed userInfo:@{NSLocalizedDescriptionKey: @"Failed to initialize updates directory with an unknown error"}]);
+    return @[];
+  }
+  NSError *dbError;
+  if (![controller initializeUpdatesDatabaseWithError:&dbError]) {
+    errorBlock(dbError ?: [NSError errorWithDomain:EXUpdatesDevLauncherControllerErrorDomain code:EXUpdatesDevLauncherErrorCodeDatabaseInitializationFailed userInfo:@{NSLocalizedDescriptionKey: @"Failed to initialize updates database with an unknown error"}]);
+    return @[];
+  }
+
+  // since controller is a singleton, save its config so we can reset to it if our request fails
+  _tempConfig = controller.config;
+
+  [self _setDevelopmentSelectionPolicy];
+  [controller setConfigurationInternal:updatesConfiguration];
+
+  EXUpdatesAppLoader *loader = [[EXUpdatesAppLoader alloc] initWithConfig:updatesConfiguration database:controller.database directory:controller.updatesDirectory launchedUpdate:nil completionQueue:controller.controllerQueue];
+  return [loader storedUpdateIds:errorBlock];
+}
+
+
 - (void)_setDevelopmentSelectionPolicy
 {
   EXUpdatesAppController *controller = EXUpdatesAppController.sharedInstance;
